@@ -5,21 +5,18 @@
 #include <string.h>
 #include <stdlib.h>
 #include <strings.h>
-#include <sys/select.h>
-#include <sys/time.h>
-#include <unistd.h>
 #include "Operaciones.h"
 #include "kbhit.h"
 
 #define FILA_TITULO       0
 #define FILA_PROMPT       1
-#define FILA_EJECUCION    3
-#define FILA_LISTOS       6
-#define FILA_FINALIZADOS 14
+#define FILA_EJECUCION    3  
+#define FILA_LISTOS       6  
+#define FILA_FINALIZADOS 14  
 #define FILA_MENSAJE     23
 
 #define INDENT "  "
-#define ANCHO_STATUS 24
+#define ANCHO_STATUS 20
 #define MS_VISIBLE  700
 
 static int contador_procesos = 0;
@@ -28,10 +25,6 @@ static int contador_procesos = 0;
 static PCB *lista_listos = NULL;
 static PCB *proceso_ejecucion = NULL;
 static PCB *lista_finalizados = NULL;
-
-// Registros del CPU simulado y quantum (máx. de instrucciones por turno)
-static CPU cpu;
-static int quantum = 3;
 
 void agregar_al_final(PCB **cabeza, PCB *nuevo) {
     nuevo->siguiente = NULL;
@@ -59,37 +52,6 @@ PCB* extraer_primero(PCB **cabeza) {
     return temp;
 }
 
-// Selección del siguiente proceso (Round Robin = el primero de la cola).
-// Para la parte 3.1 (otro algoritmo) solo se cambia esta función.
-PCB* seleccionar_siguiente() {
-    return extraer_primero(&lista_listos);
-}
-
-// Saca de una lista el nodo con ese id (NULL si no está)
-PCB* extraer_por_id(PCB **cabeza, int id) {
-    PCB *actual = *cabeza, *anterior = NULL;
-    while (actual != NULL) {
-        if (actual->id == id) {
-            if (anterior) anterior->siguiente = actual->siguiente;
-            else *cabeza = actual->siguiente;
-            actual->siguiente = NULL;
-            return actual;
-        }
-        anterior = actual;
-        actual = actual->siguiente;
-    }
-    return NULL;
-}
-
-// Estado Salida: limpieza del proceso (cierra su archivo)
-void limpiar_proceso(PCB *p) {
-    strcpy(p->estado, "Salida");
-    if (p->archivo != NULL) {
-        fclose(p->archivo);
-        p->archivo = NULL;
-    }
-}
-
 // Libera dinámicamente toda la memoria ocupada por una lista enlazada (free)
 void liberar_lista(PCB **cabeza) {
     PCB *actual = *cabeza;
@@ -114,21 +76,8 @@ void mostrar_mensaje(const char *mensaje) {
 
 void imprimir_cabecera_seccion(int fila, const char *titulo) {
     mvprintw(fila, 0, "%s:", titulo);
-    mvprintw(fila + 1, 0, INDENT "%-4s%-10s%-5s%-5s%-5s%-5s%-5s%-20s%-*s%s",
-             "ID", "Estado", "PC", "AX", "BX", "CX", "DX", "IR",
-             ANCHO_STATUS, "Status", "Proceso");
-}
-
-// Una fila de la tabla (id <= 0 se muestra como "-")
-void imprimir_fila(int fila, int id, const char *estado, int pc,
-                   int ax, int bx, int cx, int dx,
-                   const char *ir, const char *status, const char *nombre) {
-    char id_txt[12];
-    if (id > 0) snprintf(id_txt, sizeof(id_txt), "%d", id);
-    else strcpy(id_txt, "-");
-    mvprintw(fila, 0, INDENT "%-4s%-10s%-5d%-5d%-5d%-5d%-5d%-20.20s%-*.*s%s",
-             id_txt, estado, pc, ax, bx, cx, dx, ir,
-             ANCHO_STATUS, ANCHO_STATUS - 1, status, nombre);
+    mvprintw(fila + 1, 0, INDENT "%-4s%-5s%-5s%-5s%-5s%-5s%-16s%-*s%s",
+             "ID", "PC", "AX", "BX", "CX", "DX", "IR", ANCHO_STATUS, "Status", "Proceso");
 }
 
 void redibujar_pantalla() {
@@ -137,104 +86,96 @@ void redibujar_pantalla() {
         clrtoeol();
     }
 
-    // 1. ESTADO DEL CPU (siempre visible, aunque esté libre)
-    imprimir_cabecera_seccion(FILA_EJECUCION, "CPU");
+    // 1. Sección de Ejecución (Máximo 1 nodo a la vez)
+    imprimir_cabecera_seccion(FILA_EJECUCION, "Ejecucion");
     if (proceso_ejecucion != NULL) {
-        imprimir_fila(FILA_EJECUCION + 2, proceso_ejecucion->id, "Ejecucion",
-                      cpu.pc, cpu.ax, cpu.bx, cpu.cx, cpu.dx,
-                      cpu.ir, cpu.status, proceso_ejecucion->nombreProceso);
-    } else {
-        imprimir_fila(FILA_EJECUCION + 2, 0, "Libre",
-                      cpu.pc, cpu.ax, cpu.bx, cpu.cx, cpu.dx,
-                      cpu.ir, cpu.status, "-");
+        mvprintw(FILA_EJECUCION + 2, 0, INDENT "%-4d%-5d%-5d%-5d%-5d%-5d%-16s%-*s%s",
+                 proceso_ejecucion->id, proceso_ejecucion->pc, proceso_ejecucion->ax,
+                 proceso_ejecucion->bx, proceso_ejecucion->cx, proceso_ejecucion->dx,
+                 proceso_ejecucion->ir, ANCHO_STATUS, proceso_ejecucion->status, proceso_ejecucion->nombreProceso);
     }
 
-    // 2. MONITOR: procesos en Listo
+    // 2. Sección de Listos
     imprimir_cabecera_seccion(FILA_LISTOS, "Listos");
     PCB *temp = lista_listos;
     int fila = FILA_LISTOS + 2;
     while (temp != NULL && fila < FILA_FINALIZADOS) {
-        imprimir_fila(fila++, temp->id, temp->estado, temp->pc,
-                      temp->ax, temp->bx, temp->cx, temp->dx,
-                      temp->ir, temp->status, temp->nombreProceso);
+        int pc_disp = temp->pc;
+        int ax_disp = (temp->pc > 1) ? temp->ax : 0;
+        int bx_disp = (temp->pc > 1) ? temp->bx : 0;
+        int cx_disp = (temp->pc > 1) ? temp->cx : 0;
+        int dx_disp = (temp->pc > 1) ? temp->dx : 0;
+        const char *ir_disp = (temp->pc > 1) ? temp->ir : "-";
+
+        mvprintw(fila++, 0, INDENT "%-4d%-5d%-5d%-5d%-5d%-5d%-16s%-*s%s",
+                 temp->id, pc_disp, ax_disp, bx_disp, cx_disp, dx_disp,
+                 ir_disp, ANCHO_STATUS, temp->status, temp->nombreProceso);
         temp = temp->siguiente;
     }
 
-    // 3. MONITOR: procesos en Salida
+    // 3. Sección de Finalizados / Terminadas
     imprimir_cabecera_seccion(FILA_FINALIZADOS, "Terminadas");
     temp = lista_finalizados;
     fila = FILA_FINALIZADOS + 2;
     while (temp != NULL && fila < FILA_MENSAJE) {
-        imprimir_fila(fila++, temp->id, temp->estado, temp->pc,
-                      temp->ax, temp->bx, temp->cx, temp->dx,
-                      temp->ir, temp->status, temp->nombreProceso);
+        mvprintw(fila++, 0, INDENT "%-4d%-5d%-5d%-5d%-5d%-5d%-16s%-*s%s",
+                 temp->id, temp->pc, temp->ax, temp->bx, temp->cx, temp->dx,
+                 temp->ir, ANCHO_STATUS, temp->status, temp->nombreProceso);
         temp = temp->siguiente;
     }
 
     refresh();
 }
 
-// Bucle de simulación: Round Robin con quantum, interrupción con kbhit()
+// Bucle de simulación con interrupción mediante kbhit()
 void simular_procesos() {
     int interrumpido = 0;
 
     while (lista_listos != NULL && !interrumpido) {
-        // 1. Seleccionar proceso y cargar su contexto en el CPU
-        proceso_ejecucion = seleccionar_siguiente();
-        strcpy(proceso_ejecucion->estado, "Ejecucion");
-        cargar_contexto(&cpu, proceso_ejecucion);
-
+        proceso_ejecucion = extraer_primero(&lista_listos);
         char linea[100];
-        int ejecutadas = 0;
-        int termino = 0;
 
-        // 2. Ejecutar hasta agotar el quantum
-        while (ejecutadas < quantum) {
-            if (fgets(linea, sizeof(linea), proceso_ejecucion->archivo) == NULL) {
-                termino = 1;                       // fin de archivo sin END
-                break;
-            }
-
-            procesar_instruccion(&cpu, linea);     // opera sobre el CPU
-            ejecutadas++;
+        while (fgets(linea, sizeof(linea), proceso_ejecucion->archivo)) {
+            procesar_instruccion(proceso_ejecucion, linea);
             redibujar_pantalla();
             napms(MS_VISIBLE);
 
-            if (strcmp(cpu.status, "END") == 0) {
-                termino = 1;
-            } else {
-                cpu.pc++;                          // siguiente instrucción
-            }
+            // Detección de interrupción por teclado
+            if (kbhit()) {
+                getch(); // Limpia la tecla pulsada del buffer
+                
+                if (strcmp(proceso_ejecucion->status, "END") != 0) {
+                    proceso_ejecucion->pc++;
+                }
 
-            if (kbhit()) {                         // pausa por teclado
-                getch();
+                // Pausa y regresa el proceso al frente de la cola de listos
+                agregar_al_inicio(&lista_listos, proceso_ejecucion);
+                proceso_ejecucion = NULL;
+                
                 interrumpido = 1;
+                mostrar_mensaje("Ejecucion pausada. Presione ENTER para reanudar o ingrese comandos...");
+                break;
             }
 
-            if (termino || interrumpido) break;
+            if (strcmp(proceso_ejecucion->status, "END") == 0) {
+                break;
+            }
+            proceso_ejecucion->pc++;
         }
 
-        // 3. Guardar contexto CPU -> PCB
-        guardar_contexto(proceso_ejecucion, &cpu);
-
-        // 4. Decidir a dónde va el proceso
-        if (termino) {
-            limpiar_proceso(proceso_ejecucion);                       // Salida
+        if (!interrumpido && proceso_ejecucion != NULL) {
+            if (proceso_ejecucion->archivo) {
+                fclose(proceso_ejecucion->archivo);
+                proceso_ejecucion->archivo = NULL;
+            }
             agregar_al_final(&lista_finalizados, proceso_ejecucion);
-        } else {
-            strcpy(proceso_ejecucion->estado, "Listo");
-            if (interrumpido)
-                agregar_al_inicio(&lista_listos, proceso_ejecucion);  // reanuda el mismo
-            else
-                agregar_al_final(&lista_listos, proceso_ejecucion);   // Round Robin
+            proceso_ejecucion = NULL;
+            redibujar_pantalla();
         }
-        proceso_ejecucion = NULL;
-        redibujar_pantalla();
     }
 
-    if (interrumpido && lista_listos != NULL) {
-        mostrar_mensaje("Ejecucion pausada. Presione ENTER para reanudar o ingrese comandos...");
-    } else {
+    // Espera la pulsación exclusiva de ENTER al finalizar la tanda
+    if (!interrumpido) {
         mostrar_mensaje("Procesos finalizados. Presione Enter para continuar...");
         nodelay(stdscr, FALSE);
         int ch;
@@ -243,20 +184,6 @@ void simular_procesos() {
         } while (ch != '\n' && ch != '\r' && ch != KEY_ENTER);
         mostrar_mensaje("");
     }
-}
-
-// Comando mata: devuelve 0 = ok, 1 = ya habia terminado, 2 = no existe
-int mata_pid(int pid) {
-    PCB *p = extraer_por_id(&lista_listos, pid);
-    if (p != NULL) {
-        strcpy(p->status, "Terminado por mata");
-        limpiar_proceso(p);                          // estado Salida + fclose
-        agregar_al_final(&lista_finalizados, p);
-        return 0;
-    }
-    PCB *t = lista_finalizados;
-    while (t != NULL && t->id != pid) t = t->siguiente;
-    return (t != NULL) ? 1 : 2;
 }
 
 void leer_comando(char *destino, int tam) {
@@ -279,9 +206,6 @@ void iniciar_consola_ncurses() {
     curs_set(0);
     noecho();
 
-    strcpy(cpu.ir, "-");
-    strcpy(cpu.status, "-");
-
     mvprintw(FILA_TITULO, 0, "Simulador de CPU - Laboratorio SO");
     redibujar_pantalla();
 
@@ -291,7 +215,7 @@ void iniciar_consola_ncurses() {
         leer_comando(entrada, sizeof(entrada));
 
         char *token = strtok(entrada, " ");
-
+        
         // Si el usuario solo presiona ENTER sin comando
         if (token == NULL) {
             if (lista_listos != NULL) {
@@ -325,13 +249,12 @@ void iniciar_consola_ncurses() {
                     mostrar_mensaje(err);
                     napms(1500);
                 } else {
-                    PCB *nuevo = (PCB*) calloc(1, sizeof(PCB));
+                    PCB *nuevo = (PCB*) malloc(sizeof(PCB));
                     nuevo->id = ++contador_procesos;
                     nuevo->ax = nuevo->bx = nuevo->cx = nuevo->dx = 0;
                     nuevo->pc = 1;
                     strcpy(nuevo->ir, "-");
                     strcpy(nuevo->status, "OK");
-                    strcpy(nuevo->estado, "Listo");
                     strncpy(nuevo->nombreProceso, archivo, sizeof(nuevo->nombreProceso) - 1);
                     nuevo->archivo = f;
                     nuevo->siguiente = NULL;
@@ -346,37 +269,6 @@ void iniciar_consola_ncurses() {
                 mostrar_mensaje("");
                 redibujar_pantalla();
                 simular_procesos();
-            }
-        }
-        else if (strcmp(token, "mata") == 0) {
-            char *arg = strtok(NULL, " ");
-            if (arg == NULL) {
-                mostrar_mensaje("Uso: mata <pid>");
-            } else {
-                int resultado = 2;
-                int uso_incorrecto = 0;
-                while (arg != NULL) {
-                    char *fin;
-                    long pid = strtol(arg, &fin, 10);
-                    if (*fin != '\0' || pid <= 0) { uso_incorrecto = 1; break; }
-                    resultado = mata_pid((int)pid);
-                    arg = strtok(NULL, " ");
-                }
-                redibujar_pantalla();
-                if (uso_incorrecto)         mostrar_mensaje("Uso: mata <pid>");
-                else if (resultado == 0)    mostrar_mensaje("Proceso movido a Salida");
-                else if (resultado == 1)    mostrar_mensaje("ERROR el proceso ya termino");
-                else                        mostrar_mensaje("ERROR pid no existe");
-            }
-        }
-        else if (strcmp(token, "quantum") == 0) {
-            char *arg = strtok(NULL, " ");
-            int n = (arg != NULL) ? atoi(arg) : 0;
-            if (n > 0) {
-                quantum = n;
-                mostrar_mensaje("Quantum actualizado");
-            } else {
-                mostrar_mensaje("Uso: quantum <N> (N > 0)");
             }
         } else {
             mostrar_mensaje("Comando invalido");
