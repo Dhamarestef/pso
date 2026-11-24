@@ -1,0 +1,10 @@
+Lee esto y borraro antes de enviar 
+1.- la velocidad esta cambiada a 2.5 segundo si la quieres cambiar es en define ms_visible
+
+2.-ejecutar prueba_errores prueba otro archivo deberia darte el error 
+
+3.- ya tienes quantum
+
+4.- cuando mates te aparecera killed id 
+
+5.- si no existe la ide te dira que no 
