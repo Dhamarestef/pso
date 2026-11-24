@@ -1,0 +1,36 @@
+Te dejo los dos archivos completos, Operaciones.h e InterfazNcurses.h. Reemplazan los tuyos enteros, así no tienes que ir línea por línea. main_ncurses.c y kbhit.h quedan igual.
+
+Los compilé con -Wall -Wextra (cero avisos) y los probé en una terminal simulada: quantum, pausa con una tecla, mata (válido, repetido, inexistente y con argumento inválido), terminación normal y salir. Todo respondió como se espera.
+
+Cómo usarlos
+
+Reemplaza el contenido de Operaciones.h y de InterfazNcurses.h con los archivos de arriba.
+Compila con gcc main_ncurses.c -o simulador -lncurses.
+Usa una terminal de al menos 100 columnas. La columna "Proceso" empieza en la columna 86.
+
+Dónde está cada punto
+
+Punto	Dónde está
+1. Quantum	En InterfazNcurses.h: variable quantum, ciclo while (ejecutadas < quantum) de simular_procesos y el comando quantum N.
+2. CPU y contexto	En Operaciones.h: struct CPU, cargar_contexto, guardar_contexto. procesar_instruccion ahora recibe el CPU.
+3. Estado del proceso	En Operaciones.h: campo estado en el PCB. Se asigna en ejecutar, simular_procesos y limpiar_proceso.
+4. CPU visible	En redibujar_pantalla, sección "CPU", que muestra "Libre" cuando no hay proceso.
+5. mata pid	En InterfazNcurses.h: funciones extraer_por_id y mata_pid, y el bloque mata de la consola.
+6. Limpieza	En limpiar_proceso (cierra el archivo y pasa a Salida) y liberar_lista al hacer salir.
+
+Mejoras respecto a lo que te di antes
+
+Si pulsabas una tecla justo cuando un proceso terminaba, la tecla quedaba pendiente e interrumpía al siguiente proceso. Ya está corregido.
+Si pausas con un solo proceso y ya no queda nada en Listos, ya no muestra el mensaje de pausa. Muestra el de finalizado.
+mata acepta varios pids (mata 1 2 3).
+Agregué los #include que le faltaban a kbhit (sys/select.h, sys/time.h, unistd.h) dentro de InterfazNcurses.h.
+Las columnas IR y Status truncan el texto en vez de desordenar la tabla.
+
+Cómo demostrar cada punto
+
+quantum 2, luego ejecutar prueba_basica.txt prueba_mixta.txt. Los procesos se alternan cada 2 instrucciones.
+Pausa con cualquier tecla. El CPU queda en "Libre" y los procesos en Listos conservan sus registros.
+Observa que Estado (Listo/Ejecucion/Salida) es distinto de Status (OK/ERROR...).
+Con la simulación pausada, escribe mata 1. El proceso aparece en Terminadas con estado Salida.
+Prueba mata 1 otra vez, mata 99 y mata abc para ver los tres mensajes de error.
+Pulsa ENTER para reanudar y deja que termine. Al hacer salir se libera toda la memoria.
